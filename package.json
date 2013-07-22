@@ -1,0 +1,11 @@
+{
+  "name": "9p",
+  "version": "0.0.0",
+  "description": "9P protocol",
+  "main": "index.js",
+  "scripts": {
+    "test": "tap ./test"
+  },
+  "author": "Aria Stewart <aredridel@nbtsc.org>",
+  "license": "BSD"
+}
