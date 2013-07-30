@@ -1,5 +1,6 @@
 var stream = require('stream');
 var util = require('util');
+var duplex = require('duplex-combination');
 
 var NOTAG = 0xFFFF;
 var NOFID = 0xFFFFFFFF;
@@ -43,6 +44,12 @@ var types = {
     128: 'Tmax'
 }
 
+var rtypes = {};
+
+for (var i in types) {
+    rtypes[types[i]] = i;
+}
+
 function S2MStream(options) {
     if (!(this instanceof S2MStream)) return new S2MStream(options);
     if (!options) options = {};
@@ -55,18 +62,6 @@ function S2MStream(options) {
 
 util.inherits(S2MStream, stream.Transform);
 
-function M2SStream(options) {
-    if (!(this instanceof M2SStream)) return new M2SStream(options);
-    if (!options) options = {};
-    options.objectMode = true;
-
-    stream.Transform.call(this, options);
-
-    this._buffer = new Buffer(0);
-}
-
-util.inherits(M2SStream, stream.Transform);
-
 S2MStream.prototype._transform = function(chunk, encoding, callback) {
     var packetLen;
 
@@ -74,13 +69,15 @@ S2MStream.prototype._transform = function(chunk, encoding, callback) {
 
     this._buffer = Buffer.concat([this._buffer, chunk]);
 
-    if (this._buffer.length > 4 &&
+    while (this._buffer.length > 4 &&
         (packetLen = this._buffer.readUInt32LE(0)) <= this._buffer.length
 
     ) {
         this.push(convS2M(this._buffer));
         this._buffer = this._buffer.slice(packetLen);
     }
+
+    callback();
 }
 
 function convS2M(buffer) {
@@ -88,10 +85,14 @@ function convS2M(buffer) {
 
     var offset = 0;
     out.size = pbit32();
-    out.type = pbit8();
-    out.typeName = types[out.type];
+    var type = pbit8();
+    if (types[type]) {
+        out.type = types[type];
+    } else {
+        out.type = type;
+    }
     out.tag = pbit16();
-    switch (out.typeName) {
+    switch (out.type) {
     case 'Tversion':
         out.msize = pbit32();
         out.version = pstring();
@@ -125,12 +126,74 @@ function convS2M(buffer) {
     }
 }
 
-function convM2S(f) {
-    switch (f.typeName) {
+function M2SStream(options) {
+    if (!(this instanceof M2SStream)) return new M2SStream(options);
+    if (!options) options = {};
+    options.objectMode = true;
+
+    stream.Transform.call(this, options);
+}
+
+util.inherits(M2SStream, stream.Transform);
+
+M2SStream.prototype._transform = function(f, encoding, callback) {
+    if (f.type == 'Rversion' || f.type == 'Tversion' || f.type == 100 || f.type == 101) {
+        this._msize = f.msize;
+    }
+
+    this.push(convM2S(f, this._msize));
+};
+
+function convM2S(f, msize) {
+    var out = new Buffer(msize);
+    var pos = 0;
+    gbit32(0); // Save room for size.
+    gbit8(typeof f.type == 'string' ? rtypes[f.type] : f.type);
+    gbit16(f.tag);
+
+    switch (f.type) {
     case 'Rversion':
+        gbit32(msize);
+        gstring(f.version);
+    }
+
+    out.writeUInt32LE(pos, 0);
+
+    console.log(out.slice(0, pos));
+
+    return out.slice(0, pos);
+
+    function gbit32(n) {
+        out.writeUInt32LE(n, pos);
+        pos += 4;
+    }
+
+    function gbit16(n) {
+        out.writeUInt16LE(n, pos);
+        pos += 2;
+    }
+
+    function gbit8(n) {
+        out.writeUInt8(n, pos);
+        pos += 1;
+    }
+
+    function gstring(s) {
+        var l = Buffer.byteLength(s, 'utf8');
+        gbit16(l);
+        out.write(s, pos, 'utf8');
+        pos += l;
 
     }
 }
 
 exports.S2MStream = S2MStream;
 exports.M2SStream = M2SStream;
+
+exports.wrapStream = function wrapStream(stream) {
+    var s2m = new S2MStream();
+    var m2s = new M2SStream();
+    stream.pipe(s2m);
+    m2s.pipe(stream);
+    return duplex(s2m, m2s);
+};
