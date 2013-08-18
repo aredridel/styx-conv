@@ -7,6 +7,13 @@ var NOFID = 0xFFFFFFFF;
 var NOUID = -1;
 var IOHDRSIZE = 24;
 
+var QTDIR    = 0x80 /* type bit for directories */
+var QTAPPEND = 0x40 /* type bit for append only files */
+var QTEXCL   = 0x20 /* type bit for exclusive use files */
+var QTMOUNT  = 0x10 /* type bit for mounted channel */
+var QTAUTH   = 0x08 /* type bit for authentication file */
+var QTFILE   = 0x00 /* plain file */
+
 var types = {
     /* 9P2000.u */
     98: 'Topenfd',
@@ -94,8 +101,26 @@ function convS2M(buffer) {
     out.tag = pbit16();
     switch (out.type) {
     case 'Tversion':
+    case 'Rversion':
         out.msize = pbit32();
         out.version = pstring();
+        break;
+    case 'Tattach':
+        out.fid = pbit32();
+        out.afid = pbit32();
+        out.uname = pstring();
+        out.aname = pstring();
+        break;
+    case 'Rattach':
+        out.qid = pqid();
+        break;
+    case 'Tauth':
+        out.afid = pbit32();
+        out.uname = pstring();
+        out.aname = pstring();
+        break;
+    case 'Rauth':
+        out.aqid = pqid();
         break;
     }
     return out;
@@ -142,6 +167,8 @@ M2SStream.prototype._transform = function(f, encoding, callback) {
     }
 
     this.push(convM2S(f, this._msize));
+
+    callback();
 };
 
 function convM2S(f, msize) {
@@ -155,6 +182,10 @@ function convM2S(f, msize) {
     case 'Rversion':
         gbit32(msize);
         gstring(f.version);
+        break;
+    case 'Rattach':
+        gqid(f.qid);
+        break;
     }
 
     out.writeUInt32LE(pos, 0);
@@ -184,6 +215,13 @@ function convM2S(f, msize) {
         out.write(s, pos, 'utf8');
         pos += l;
 
+    }
+
+    function gqid(q) {
+        gbit8(QTDIR); // Type
+        gbit32(0); // Version
+        gbit32(0); // Path[0]
+        gbit32(0); // Path[1]
     }
 }
 
