@@ -9,6 +9,7 @@
   "author": "Aria Stewart <aredridel@nbtsc.org>",
   "license": "BSD",
   "dependencies": {
-    "duplex-combination": "~1.0.0"
+    "duplex-combination": "~1.0.0",
+    "long": "~1.1.2"
   }
 }

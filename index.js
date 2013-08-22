@@ -1,6 +1,9 @@
+require('buffer').INSPECT_MAX_BYTES = 1000
 var stream = require('stream');
 var util = require('util');
 var duplex = require('duplex-combination');
+
+var Long = require('long');
 
 var NOTAG = 0xFFFF;
 var NOFID = 0xFFFFFFFF;
@@ -122,14 +125,64 @@ function convS2M(buffer) {
     case 'Rauth':
         out.aqid = pqid();
         break;
+    case 'Twalk':
+        out.fid = pbit32();
+        out.newfid = pbit32();
+        out.nwname = pbit16();
+        out.wname = [];
+        for (var i = 0; i < out.nwname; i++) {
+            out.wname.push(pstring());
+        }
+        break;
+    case 'Rwalk':
+        var nwqid = pbit16();
+        out.wqid = [];
+        for (var i = 0; i < nwqid; i++) {
+            out.wqid.push(pqid());
+        }
+        break;
+    case 'Topen':
+        out.fid = pbit32();
+        out.mode = pbit8();
+        break;
+    case 'Ropen':
+        out.qid = pqid();
+        out.iounit = pbit32();
+        break;
+    case 'Tstat':
+        out.fid = pbit32();
+        break;
+    case 'Rstat':
+        out.stat = pstat();
+        break;
+    case 'Tread':
+        out.fid = pbit32();
+        out.offset = pbit64();
+        out.count = pbit32();
+        break;
+    case 'Rread':
+        out.data = pbuffer(pbit32());
+        break;
     }
     return out;
+
+    function pbuffer(len) {
+        var o = buffer.slice(offset, offset + len);
+        offset += len;
+        return o;
+    }
 
     function pstring() {
         var length = pbit16();
         var o = buffer.slice(offset, offset + length).toString('utf8');
         offset += length;
         return o;
+    }
+
+    function pbit64() {
+        var low = pbit32();
+        var high = pbit32();
+        return new Long(low, high, true);
     }
 
     function pbit32() {
@@ -148,6 +201,15 @@ function convS2M(buffer) {
         var b = buffer.readUInt8(offset);
         offset += 1;
         return b;
+    }
+
+    function pqid() {
+        var out = {};
+        out.type = pbit8();
+        out.version = pbit32();
+        out.path1 = pbit32();
+        out.path2 = pbit32();
+        return out;
     }
 }
 
@@ -178,13 +240,36 @@ function convM2S(f, msize) {
     gbit8(typeof f.type == 'string' ? rtypes[f.type] : f.type);
     gbit16(f.tag);
 
+    var startPos = pos;
     switch (f.type) {
     case 'Rversion':
         gbit32(msize);
         gstring(f.version);
         break;
+    case 'Rauth':
+        gqid(f.qid);
+        break;
     case 'Rattach':
         gqid(f.qid);
+        break;
+    case 'Rwalk':
+        gbit16(f.wqid ? f.wqid.length : 0);
+        if (f.wqid) f.wqid.forEach(function(wqid) {
+            gqid(wqid);
+        });
+        break;
+    case 'Ropen':
+        gqid(f.qid);
+        gbit32(f.iounit)
+        break;
+    case 'Rstat':
+        gbit16(0); // save room for size
+        convM2D(f.stat);
+        out.writeUInt16LE(pos - startPos - 2, startPos);
+        break;
+    case 'Rread':
+        gbit32(f.data.length);
+        gbuffer(f.data);
         break;
     }
 
@@ -194,19 +279,34 @@ function convM2S(f, msize) {
 
     return out.slice(0, pos);
 
+    function gbit64(n) {
+        if (n instanceof Long) {
+            gbit32(n.getLowBitsUnsigned());
+            gbit32(n.getHighBitsUnsigned());
+        } else {
+            gbit32(n);
+            gbit32(0);
+        }
+    }
+
     function gbit32(n) {
-        out.writeUInt32LE(n, pos);
+        out.writeUInt32LE(n || 0, pos);
         pos += 4;
     }
 
     function gbit16(n) {
-        out.writeUInt16LE(n, pos);
+        out.writeUInt16LE(n || 0, pos);
         pos += 2;
     }
 
     function gbit8(n) {
-        out.writeUInt8(n, pos);
+        out.writeUInt8(n || 0, pos);
         pos += 1;
+    }
+
+    function gbuffer(b) {
+        b.copy(out);
+        pos += b.length;
     }
 
     function gstring(s) {
@@ -218,10 +318,28 @@ function convM2S(f, msize) {
     }
 
     function gqid(q) {
-        gbit8(QTDIR); // Type
-        gbit32(0); // Version
-        gbit32(0); // Path[0]
-        gbit32(0); // Path[1]
+        gbit8(q.type);
+        gbit32(q.version);
+        gbit32(q.path1);
+        gbit32(q.path2);
+    }
+
+    function convM2D(d) {
+        gbit16(0); // save room for size
+        var sizePos = pos;
+        gbit16(d.type || 0);
+        gbit32(d.dev || 0);
+        gqid(d.qid);
+        gbit32(d.mode);
+        gbit32(d.atime);
+        gbit32(d.mtime);
+        gbit64(d.size);
+        gstring(d.name);
+        gstring(d.uid);
+        gstring(d.gid);
+        gstring(d.muid);
+
+        out.writeUInt16LE(pos - sizePos, sizePos);
     }
 }
 
