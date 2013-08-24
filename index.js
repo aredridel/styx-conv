@@ -207,8 +207,7 @@ function convS2M(buffer) {
         var out = {};
         out.type = pbit8();
         out.version = pbit32();
-        out.path1 = pbit32();
-        out.path2 = pbit32();
+        out.path = pbit64();
         return out;
     }
 }
@@ -320,8 +319,7 @@ function convM2S(f, msize) {
     function gqid(q) {
         gbit8(q.type);
         gbit32(q.version);
-        gbit32(q.path1);
-        gbit32(q.path2);
+        gbit64(q.path);
     }
 
     function convM2D(d) {
