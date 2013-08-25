@@ -1,7 +1,8 @@
 {
-  "name": "9p",
+  "name": "styx-conv",
   "version": "0.0.0",
-  "description": "9P protocol",
+  "description": "Low-level parsers for the 9P protocol structures",
+  "keywords": ["9p", "styx", "convS2M", "convM2S", "convM2D", "convD2M"],
   "main": "index.js",
   "scripts": {
     "test": "tap ./test"
